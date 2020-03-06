@@ -33,6 +33,6 @@ public final class Heading extends Node {
 
     @Override
     boolean isValidChild(Node child) {
-        return child instanceof Text || child instanceof Image;
+        return child instanceof Text || child instanceof Image || child instanceof Link;
     }
 }

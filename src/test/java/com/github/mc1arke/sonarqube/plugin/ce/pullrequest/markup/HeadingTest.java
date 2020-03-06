@@ -47,4 +47,9 @@ public class HeadingTest {
         assertTrue(new Heading(2).isValidChild(new Image("alt", "src")));
     }
 
+    @Test
+    public void checkValidAddChildLink() {
+        assertTrue(new Heading(2).isValidChild(new Link("url")));
+    }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Michael Clarke
+ * Copyright (C) 2020 Michael Clarke
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,19 +19,21 @@
 package com.github.mc1arke.sonarqube.plugin.ce.pullrequest;
 
 
-import com.github.mc1arke.sonarqube.plugin.SonarqubeCompatibility;
-import org.apache.commons.lang.StringUtils;
 import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.markup.Document;
 import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.markup.FormatterFactory;
 import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.markup.Heading;
 import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.markup.Image;
+import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.markup.Link;
 import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.markup.ListItem;
 import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.markup.Node;
 import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.markup.Paragraph;
 import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.markup.Text;
+import org.apache.commons.lang.StringUtils;
 import org.sonar.api.ce.posttask.Analysis;
 import org.sonar.api.ce.posttask.Project;
 import org.sonar.api.ce.posttask.QualityGate;
+import org.sonar.api.ce.posttask.QualityGate.EvaluationStatus;
+import org.sonar.api.ce.posttask.ScannerContext;
 import org.sonar.api.config.Configuration;
 import org.sonar.api.issue.Issue;
 import org.sonar.api.measures.CoreMetrics;
@@ -45,12 +47,18 @@ import org.sonar.ce.task.projectanalysis.metric.MetricRepository;
 import org.sonar.core.issue.DefaultIssue;
 import org.sonar.server.measure.Rating;
 
+import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.text.NumberFormat;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -70,6 +78,7 @@ public class AnalysisDetails {
 
     public static final String IMAGE_URL_BASE = "com.github.mc1arke.sonarqube.plugin.branch.image-url-base";
 
+    private final String publicRootURL;
     private final BranchDetails branchDetails;
     private final MeasuresHolder measuresHolder;
     private final PostAnalysisIssueVisitor postAnalysisIssueVisitor;
@@ -77,11 +86,13 @@ public class AnalysisDetails {
     private final Analysis analysis;
     private final Project project;
     private final Configuration configuration;
+    private final ScannerContext scannerContext;
 
     AnalysisDetails(BranchDetails branchDetails, PostAnalysisIssueVisitor postAnalysisIssueVisitor,
                     QualityGate qualityGate, MeasuresHolder measuresHolder, Analysis analysis, Project project,
-                    Configuration configuration) {
+                    Configuration configuration, String publicRootURL, ScannerContext scannerContext) {
         super();
+        this.publicRootURL = publicRootURL;
         this.branchDetails = branchDetails;
         this.measuresHolder = measuresHolder;
         this.postAnalysisIssueVisitor = postAnalysisIssueVisitor;
@@ -89,6 +100,7 @@ public class AnalysisDetails {
         this.analysis = analysis;
         this.project = project;
         this.configuration = configuration;
+        this.scannerContext = scannerContext;
     }
 
     public String getBranchName() {
@@ -103,21 +115,31 @@ public class AnalysisDetails {
         return qualityGate.getStatus();
     }
 
+    public Optional<String> getScannerProperty(String propertyName) {
+        return Optional.ofNullable(scannerContext.getProperties().get(propertyName));
+    }
+
     public String createAnalysisSummary(FormatterFactory formatterFactory) {
 
         BigDecimal newCoverage =
-                findQualityGateCondition(CoreMetrics.NEW_COVERAGE_KEY).map(QualityGate.Condition::getValue)
-                        .map(BigDecimal::new).orElse(null);
+                findQualityGateCondition(CoreMetrics.NEW_COVERAGE_KEY)
+                    .filter(condition -> condition.getStatus() != EvaluationStatus.NO_VALUE)
+                    .map(QualityGate.Condition::getValue)
+                    .map(BigDecimal::new)
+                    .orElse(null);
 
-        double coverage = findMeasure(CoreMetrics.COVERAGE_KEY).map(MeasureWrapper::getDoubleValue).orElse(0D);
+        double coverage = findMeasure(CoreMetrics.COVERAGE_KEY).map(Measure::getDoubleValue).orElse(0D);
 
         BigDecimal newDuplications = findQualityGateCondition(CoreMetrics.NEW_DUPLICATED_LINES_DENSITY_KEY)
-                .map(QualityGate.Condition::getValue).map(BigDecimal::new).orElse(null);
+            .filter(condition -> condition.getStatus() != EvaluationStatus.NO_VALUE)
+            .map(QualityGate.Condition::getValue)
+            .map(BigDecimal::new)
+            .orElse(null);
 
         double duplications =
-                findMeasure(CoreMetrics.DUPLICATED_LINES_DENSITY_KEY).map(MeasureWrapper::getDoubleValue).orElse(0D);
+                findMeasure(CoreMetrics.DUPLICATED_LINES_DENSITY_KEY).map(Measure::getDoubleValue).orElse(0D);
 
-        NumberFormat decimalFormat = new DecimalFormat("#0.00");
+        NumberFormat decimalFormat = new DecimalFormat("#0.00", DecimalFormatSymbols.getInstance(Locale.ENGLISH));
 
         Map<RuleType, Long> issueCounts = countRuleByType();
         long issueTotal = issueCounts.values().stream().mapToLong(l -> l).sum();
@@ -171,7 +193,9 @@ public class AnalysisDetails {
                                                                  .map(i -> i + "% Duplicated Code")
                                                                  .orElse("No duplication information") + " (" +
                                                          decimalFormat.format(duplications) +
-                                                         "% Estimated after merge)"))));
+                                                         "% Estimated after merge)"))), new Link(
+                publicRootURL + "/dashboard?id=" + encode(project.getKey(), StandardCharsets.UTF_8) + "&pullRequest=" +
+                branchDetails.getBranchName(), new Text("View in SonarQube")));
 
         return formatterFactory.documentFormatter().format(document, formatterFactory);
     }
@@ -192,8 +216,10 @@ public class AnalysisDetails {
                 new Paragraph(new Text(String.format("**Type:** %s ", issue.type().name())), new Image(issue.type().name(), String.format("%s/checks/IssueType/%s.svg?sanitize=true", baseImageUrl, issue.type().name().toLowerCase()))),
                 new Paragraph(new Text(String.format("**Severity:** %s ", issue.severity())), new Image(issue.severity(), String.format("%s/checks/Severity/%s.svg?sanitize=true", baseImageUrl, issue.severity().toLowerCase()))),
                 new Paragraph(new Text(String.format("**Message:** %s", issue.getMessage()))),
-                effortNode,
-                resolutionNode
+                effortNode, resolutionNode, new Link(
+                publicRootURL + "/project/issues?id=" + encode(project.getKey(), StandardCharsets.UTF_8) +
+                "&pullRequest=" + branchDetails.getBranchName() + "&issues=" + issue.key() + "&open=" + issue.key(),
+                new Text("View in SonarQube"))
         );
         return formatterFactory.documentFormatter().format(document, formatterFactory);
     }
@@ -261,11 +287,10 @@ public class AnalysisDetails {
                 .collect(Collectors.toList());
     }
 
-    private Optional<MeasureWrapper> findMeasure(String metricKey) {
+    private Optional<Measure> findMeasure(String metricKey) {
         return measuresHolder.getMeasureRepository().getRawMeasure(measuresHolder.getTreeRootHolder().getRoot(),
                                                                    measuresHolder.getMetricRepository()
-                                                                           .getByKey(metricKey))
-                .map(MeasureWrapper::new);
+                                                                           .getByKey(metricKey));
     }
 
     public Optional<QualityGate.Condition> findQualityGateCondition(String metricKey) {
@@ -295,7 +320,7 @@ public class AnalysisDetails {
                             condition.getOperator() == QualityGate.Operator.GREATER_THAN ? "is worse than" :
                             "is better than", Rating.valueOf(Integer.parseInt(condition.getErrorThreshold())));
         } else if (metric.getType() == Metric.ValueType.PERCENT) {
-            NumberFormat numberFormat = new DecimalFormat("#0.00");
+            NumberFormat numberFormat = new DecimalFormat("#0.00", DecimalFormatSymbols.getInstance(Locale.ENGLISH));
             return String.format("%s%% %s (%s %s%%)", numberFormat.format(new BigDecimal(condition.getValue())),
                                  metric.getName(),
                                  condition.getOperator() == QualityGate.Operator.GREATER_THAN ? "is greater than" :
@@ -304,6 +329,14 @@ public class AnalysisDetails {
             return String.format("%s %s (%s %s)", condition.getValue(), metric.getName(),
                                  condition.getOperator() == QualityGate.Operator.GREATER_THAN ? "is greater than" :
                                  "is less than", condition.getErrorThreshold());
+        }
+    }
+
+    private static String encode(String original, Charset charset) {
+        try {
+            return URLEncoder.encode(original, charset.name());
+        } catch (UnsupportedEncodingException ex) {
+            throw new IllegalStateException("Could not encode input", ex);
         }
     }
 
@@ -371,25 +404,6 @@ public class AnalysisDetails {
         private String getImageName() {
             return imageName;
         }
-    }
-
-    private static class MeasureWrapper implements SonarqubeCompatibility.Major7.Minor9 {
-
-        private final Measure measure;
-
-        MeasureWrapper(Measure measure) {
-            super();
-            this.measure = measure;
-        }
-
-        Double getDoubleValue() {
-            try {
-                return (Double) Measure.class.getDeclaredMethod("getDoubleValue").invoke(measure);
-            } catch (ReflectiveOperationException ex) {
-                throw new IllegalStateException("Could not invoke getDoubleValue", ex);
-            }
-        }
-
     }
 
 }

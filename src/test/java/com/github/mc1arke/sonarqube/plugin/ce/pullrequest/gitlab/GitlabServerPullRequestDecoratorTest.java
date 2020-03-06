@@ -1,29 +1,46 @@
+/*
+ * Copyright (C) 2019 Markus Heberling
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 3 of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program; if not, write to the Free Software Foundation,
+ * Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ *
+ */
 package com.github.mc1arke.sonarqube.plugin.ce.pullrequest.gitlab;
+
+import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.AnalysisDetails;
+import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.PostAnalysisIssueVisitor;
+import com.github.tomakehurst.wiremock.junit.WireMockRule;
+import org.junit.Rule;
+import org.junit.Test;
+import org.mockito.Mockito;
+import org.sonar.api.ce.posttask.QualityGate;
+import org.sonar.api.issue.Issue;
+import org.sonar.api.measures.CoreMetrics;
+import org.sonar.api.platform.Server;
+import org.sonar.ce.task.projectanalysis.component.Component;
+import org.sonar.ce.task.projectanalysis.scm.Changeset;
+import org.sonar.ce.task.projectanalysis.scm.ScmInfo;
+import org.sonar.ce.task.projectanalysis.scm.ScmInfoRepository;
+import org.sonar.core.issue.DefaultIssue;
+import org.sonar.db.alm.setting.AlmSettingDto;
+import org.sonar.db.alm.setting.ProjectAlmSettingDto;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Optional;
-
-import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.AnalysisDetails;
-import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.PostAnalysisIssueVisitor;
-import com.github.mc1arke.sonarqube.plugin.ce.pullrequest.PullRequestBuildStatusDecorator;
-import com.github.tomakehurst.wiremock.junit.WireMockRule;
-import org.junit.Rule;
-import org.junit.Test;
-import org.mockito.Mockito;
-import org.sonar.api.ce.posttask.QualityGate;
-import org.sonar.api.config.Configuration;
-import org.sonar.api.issue.Issue;
-import org.sonar.api.measures.CoreMetrics;
-import org.sonar.api.platform.Server;
-import org.sonar.ce.task.projectanalysis.component.Component;
-import org.sonar.ce.task.projectanalysis.component.ConfigurationRepository;
-import org.sonar.ce.task.projectanalysis.scm.Changeset;
-import org.sonar.ce.task.projectanalysis.scm.ScmInfo;
-import org.sonar.ce.task.projectanalysis.scm.ScmInfoRepository;
-import org.sonar.core.issue.DefaultIssue;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.created;
 import static com.github.tomakehurst.wiremock.client.WireMock.delete;
@@ -35,6 +52,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -56,22 +74,20 @@ public class GitlabServerPullRequestDecoratorTest {
         String filePath = "/path/to/file";
         int lineNumber = 5;
 
-        ConfigurationRepository configurationRepository = mock(ConfigurationRepository.class);
-        Configuration configuration = mock(Configuration.class);
-
-        when(configurationRepository.getConfiguration()).thenReturn(configuration);
-        when(configuration.get(GitlabServerPullRequestDecorator.PULLREQUEST_GITLAB_URL)).thenReturn(Optional.of(wireMockRule.baseUrl()));
-        when(configuration.get(GitlabServerPullRequestDecorator.PULLREQUEST_GITLAB_TOKEN)).thenReturn(Optional.of("token"));
-        when(configuration.get(GitlabServerPullRequestDecorator.PULLREQUEST_GITLAB_REPOSITORY_SLUG)).thenReturn(Optional.of(repositorySlug));
-        when(configuration.get(PullRequestBuildStatusDecorator.PULL_REQUEST_COMMENT_SUMMARY_ENABLED)).thenReturn(Optional.of("true"));
-        when(configuration.get(PullRequestBuildStatusDecorator.PULL_REQUEST_DELETE_COMMENTS_ENABLED)).thenReturn(Optional.of("true"));
-        when(configuration.get(PullRequestBuildStatusDecorator.PULL_REQUEST_FILE_COMMENT_ENABLED)).thenReturn(Optional.of("true"));
-
         QualityGate.Condition coverage = mock(QualityGate.Condition.class);
         when(coverage.getStatus()).thenReturn(QualityGate.EvaluationStatus.OK);
         when(coverage.getValue()).thenReturn("10");
 
+        ProjectAlmSettingDto projectAlmSettingDto = mock(ProjectAlmSettingDto.class);
+        AlmSettingDto almSettingDto = mock(AlmSettingDto.class);
+        when(almSettingDto.getPersonalAccessToken()).thenReturn("token");
+
         AnalysisDetails analysisDetails = mock(AnalysisDetails.class);
+        when(analysisDetails.getScannerProperty(eq(GitlabServerPullRequestDecorator.PULLREQUEST_GITLAB_INSTANCE_URL)))
+                .thenReturn(Optional.of(wireMockRule.baseUrl()+"/api/v4"));
+        when(analysisDetails
+                     .getScannerProperty(eq(GitlabServerPullRequestDecorator.PULLREQUEST_GITLAB_PROJECT_ID)))
+                .thenReturn(Optional.of(repositorySlug));
         when(analysisDetails.getAnalysisProjectKey()).thenReturn(projectKey);
         when(analysisDetails.getBranchName()).thenReturn(branchName);
         when(analysisDetails.getCommitSha()).thenReturn(commitSHA);
@@ -146,6 +162,7 @@ public class GitlabServerPullRequestDecoratorTest {
                         urlEncode("position[base_sha]") + "=d6a420d043dfe85e7c240fd136fc6e197998b10a&" +
                         urlEncode("position[start_sha]") + "=d6a420d043dfe85e7c240fd136fc6e197998b10a&" +
                         urlEncode("position[head_sha]") + "=" + commitSHA + "&" +
+                        urlEncode("position[old_path]") + "=" + urlEncode(filePath) + "&" +
                         urlEncode("position[new_path]") + "=" + urlEncode(filePath) + "&" +
                         urlEncode("position[new_line]") + "=" + lineNumber + "&" +
                         urlEncode("position[position_type]") + "=text"))
@@ -153,13 +170,14 @@ public class GitlabServerPullRequestDecoratorTest {
 
         Server server = mock(Server.class);
         when(server.getPublicRootUrl()).thenReturn(sonarRootUrl);
-        GitlabServerPullRequestDecorator pullRequestDecorator = new GitlabServerPullRequestDecorator(server, configurationRepository, scmInfoRepository);
+        GitlabServerPullRequestDecorator pullRequestDecorator =
+                new GitlabServerPullRequestDecorator(server, scmInfoRepository);
 
 
-        pullRequestDecorator.decorateQualityGateStatus(analysisDetails);
+        pullRequestDecorator.decorateQualityGateStatus(analysisDetails, almSettingDto, projectAlmSettingDto);
     }
 
-    private String urlEncode(String value) {
+    private static String urlEncode(String value) {
         try {
             return URLEncoder.encode(value, StandardCharsets.UTF_8.name());
         } catch (UnsupportedEncodingException e) {

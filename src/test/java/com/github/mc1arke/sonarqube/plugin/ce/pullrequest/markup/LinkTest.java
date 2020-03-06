@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Oliver Jedinger
+ * Copyright (C) 2020 Markus Heberling
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,29 +16,30 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
  */
-package com.github.mc1arke.sonarqube.plugin.ce.pullrequest.bitbucket.response.activity;
+package com.github.mc1arke.sonarqube.plugin.ce.pullrequest.markup;
 
-import java.io.Serializable;
+import org.junit.Test;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
-public class User implements Serializable {
-    private final String name;
+public class LinkTest {
 
-    private final String slug;
-
-    @JsonCreator
-    public User(@JsonProperty("name") final String name, @JsonProperty("slug") final String slug) {
-        this.name = name;
-        this.slug = slug;
+    @Test
+    public void correctParametersReturned() {
+        Link image = new Link("url", new Text("Text"));
+        assertThat(image).extracting(Link::getUrl).isEqualTo("url");
     }
 
-    public String getName() {
-        return name;
+    @Test
+    public void testIsValidChildInvalidChild() {
+        assertFalse(new Link("url", new Text("Text")).isValidChild(new Paragraph()));
     }
 
-    public String getSlug() {
-        return slug;
+    @Test
+    public void testIsValidChildValidChildText() {
+        assertTrue(new Link("url", new Text("Text")).isValidChild(new Text("")));
     }
+
 }

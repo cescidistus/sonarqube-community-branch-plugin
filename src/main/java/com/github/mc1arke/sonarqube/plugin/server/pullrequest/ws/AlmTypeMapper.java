@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Michael Clarke
+ * Copyright (C) 2020 Michael Clarke
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,19 +16,29 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
  */
-package com.github.mc1arke.sonarqube.plugin.server;
+package com.github.mc1arke.sonarqube.plugin.server.pullrequest.ws;
 
-import com.github.mc1arke.sonarqube.plugin.SonarqubeCompatibility;
+import org.sonar.db.alm.setting.ALM;
+import org.sonarqube.ws.AlmSettings;
 
-import java.util.Optional;
+public final class AlmTypeMapper {
 
-public interface ComponentKeyCompatibility extends SonarqubeCompatibility {
+    private AlmTypeMapper() {
+        super();
+    }
 
-    interface ComponentKeyCompatibilityMajor7 extends ComponentKeyCompatibility, SonarqubeCompatibility.Major7 {
-
-        interface ComponentKeyCompatibilityMinor9 extends ComponentKeyCompatibilityMajor7, SonarqubeCompatibility.Major7.Minor9 {
-
-            Optional<String> getDeprecatedBranchName();
+    public static AlmSettings.Alm toAlmWs(ALM alm) {
+        switch (alm) {
+            case AZURE_DEVOPS:
+                return AlmSettings.Alm.azure;
+            case BITBUCKET:
+                return AlmSettings.Alm.bitbucket;
+            case GITHUB:
+                return AlmSettings.Alm.github;
+            case GITLAB:
+                return AlmSettings.Alm.gitlab;
+            default:
+                throw new IllegalStateException(String.format("Unknown ALM '%s'", alm.name()));
         }
     }
 }
